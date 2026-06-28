@@ -281,7 +281,12 @@ function logout() {
   localStorage.removeItem('jwt');
   jwtToken = null;
   currentUser = null;
-  window.location.reload();
+  const loginContainer = document.getElementById('login-container');
+  const appLayout = document.getElementById('app-layout');
+  if (loginContainer) loginContainer.style.display = 'flex';
+  if (appLayout) appLayout.style.display = 'none';
+  const errorDiv = document.getElementById('login-error');
+  if (errorDiv) { errorDiv.textContent = ''; errorDiv.style.display = 'none'; }
 }
 
 // === API HELPERS ===

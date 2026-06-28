@@ -1,7 +1,7 @@
 # Playout Script for RadioPlay One (Liquidsoap 2.2.4)
 
 # Enable log outputs
-set("log.file.path", "/home/ubuntu/radioplayone/storage/liquidsoap.log")
+set("log.file.path", "/var/www/radiodj/storage/liquidsoap.log")
 set("log.stdout", true)
 set("log.level", 3)
 
@@ -43,7 +43,7 @@ output.icecast(%mp3(bitrate=128),
   id="playout_output",
   host="localhost",
   port=8000,
-  password="hackme",
+  password="RadioPlay2024!",
   mount="playout",
   name="RadioPlay Playout Stream",
   description="Automated Playout Feed",
