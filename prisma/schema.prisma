@@ -11,40 +11,39 @@ model User {
   id           Int           @id @default(autoincrement())
   email        String        @unique
   passwordHash String
-  role         String        @default("VIEWER") // ADMIN, DJ, PRODUCER, VIEWER
+  role         String        @default("VIEWER")
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
   activityLogs ActivityLog[]
 }
 
 model Track {
-  id           Int                @id @default(autoincrement())
-  title        String
-  artist       String?
-  album        String?
-  duration     Float              // in seconds
-  fileHash     String             @unique // SHA256 of the audio file to dedup
-  filePath     String             // path to the file on disk
-  fileType     String             @default("SONG") // SONG, AD, JINGLE, STATION_ID, FILLER
-  coverArtUrl  String?
-  isDeleted    Boolean            @default(false)
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
-  categories   TrackCategory[]    // many-to-many
-  playlists    PlaylistTrack[]
-  fallbackItem FallbackPoolItem?
-  playLogs     PlayLog[]
-  adTrack      AdTrack?
-  instantCarts InstantCart[]
-  
-  // Custom Playback Overrides
-  volumeTrim   Float              @default(1.0)  // Volume multiplier (e.g. 0.8 to quiet, 1.2 to boost)
-  cueStart     Float              @default(0.0)  // Skips silence at the start of file
-  cueIntro     Float              @default(0.0)  // Talkover point (where vocals start, DJ voice fades down)
-  cueOutro     Float              @default(0.0)  // Transition trigger point (where next song starts fading in)
-  cueEnd       Float              @default(0.0)  // Cut off point (skips tail silence)
-  fadeDuration Float?                            // Custom fade duration override in seconds
-  isExplicit   Boolean            @default(false)
+  id               Int                 @id @default(autoincrement())
+  title            String
+  artist           String?
+  album            String?
+  duration         Float
+  fileHash         String              @unique
+  filePath         String
+  fileType         String              @default("SONG")
+  coverArtUrl      String?
+  isDeleted        Boolean             @default(false)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  categories       TrackCategory[]
+  playlists        PlaylistTrack[]
+  fallbackItem     FallbackPoolItem?
+  playLogs         PlayLog[]
+  adTrack          AdTrack?
+  cartTracks       CartTrack[]
+  fallbackTracks   FallbackPoolTrack[]
+  volumeTrim       Float               @default(1.0)
+  cueStart         Float               @default(0.0)
+  cueIntro         Float               @default(0.0)
+  cueOutro         Float               @default(0.0)
+  cueEnd           Float               @default(0.0)
+  fadeDuration     Float?
+  isExplicit       Boolean             @default(false)
 }
 
 model TrackCategory {
@@ -54,15 +53,15 @@ model TrackCategory {
   parentId    Int?
   parent      TrackCategory?  @relation("SubCategories", fields: [parentId], references: [id], onDelete: SetNull)
   children    TrackCategory[] @relation("SubCategories")
-  tracks      Track[]         // many-to-many
+  tracks      Track[]
 }
 
 model Playlist {
   id           Int             @id @default(autoincrement())
   name         String
   isScheduled  Boolean         @default(false)
-  scheduleTime String?         // HH:MM format or Cron expression
-  duration     Float           @default(0.0) // sum of track durations
+  scheduleTime String?
+  duration     Float           @default(0.0)
   isLooping    Boolean         @default(true)
   createdAt    DateTime        @default(now())
   updatedAt    DateTime        @updatedAt
@@ -73,34 +72,91 @@ model PlaylistTrack {
   id         Int      @id @default(autoincrement())
   playlistId Int
   trackId    Int
-  position   Int      // Ordering position (0, 1, 2...)
+  position   Int
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
-
   playlist   Playlist @relation(fields: [playlistId], references: [id], onDelete: Cascade)
   track      Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
-
-  @@unique([playlistId, position]) // ensure unique positions within a playlist
+  @@unique([playlistId, position])
 }
 
+// Legacy single fallback pool (kept for migration safety)
 model FallbackPoolItem {
   id        Int      @id @default(autoincrement())
   trackId   Int      @unique
-  priority  Int      @default(0) // Higher = played first
+  priority  Int      @default(0)
   createdAt DateTime @default(now())
-
   track     Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+}
+
+// Named Carts (Sweepers, Station IDs, Drops, Jingles)
+model Cart {
+  id          Int         @id @default(autoincrement())
+  name        String
+  type        String      @default("JINGLE") // SWEEPER, STATION_ID, DROP, JINGLE, OTHER
+  description String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  tracks      CartTrack[]
+}
+
+model CartTrack {
+  id       Int   @id @default(autoincrement())
+  cartId   Int
+  trackId  Int
+  position Int   @default(0)
+  cart     Cart  @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  track    Track @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  @@unique([cartId, trackId])
+}
+
+// Multiple named fallback pools, priority-ordered (lower number = plays first)
+model FallbackPool {
+  id          Int                 @id @default(autoincrement())
+  name        String
+  description String?
+  priority    Int                 @default(0)
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  tracks      FallbackPoolTrack[]
+}
+
+model FallbackPoolTrack {
+  id       Int          @id @default(autoincrement())
+  poolId   Int
+  trackId  Int
+  position Int          @default(0)
+  pool     FallbackPool @relation(fields: [poolId], references: [id], onDelete: Cascade)
+  track    Track        @relation(fields: [trackId], references: [id], onDelete: Restrict)
+  @@unique([poolId, trackId])
+}
+
+// Time-based schedule blocks (up to 3 months ahead)
+model ScheduleBlock {
+  id             Int      @id @default(autoincrement())
+  name           String
+  contentType    String   // PLAYLIST, CART
+  contentId      Int?
+  startTime      DateTime
+  endTime        DateTime
+  isRecurring    Boolean  @default(false)
+  recurrenceDays String?  // "MON,TUE,WED,THU,FRI" etc.
+  color          String   @default("#00f0ff")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([startTime])
+  @@index([endTime])
 }
 
 model PlayLog {
   id             Int      @id @default(autoincrement())
   trackId        Int
   playedAt       DateTime @default(now())
-  durationPlayed Float    // actual seconds played before transitioning/stopping
-  status         String   @default("COMPLETED") // COMPLETED, INTERRUPTED
+  durationPlayed Float
+  status         String   @default("COMPLETED")
   listenerCount  Int      @default(0)
   wasAd          Boolean  @default(false)
-
   track          Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
 }
 
@@ -110,27 +166,25 @@ model ActivityLog {
   action    String
   details   String?
   timestamp DateTime @default(now())
-
   user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 }
 
 model SystemSetting {
-  key   String @id // e.g. "theme", "station_info"
-  value String // JSON string containing settings
+  key   String @id
+  value String
 }
 
 model ListenerSession {
   id             String    @id @default(uuid())
-  icecastId      String    // The unique ID assigned by Icecast
-  ipHash         String    // SHA-256 hash of IP (For GDPR/Privacy Compliance)
-  country        String    @default("Unknown") // Geo-IP country code (e.g., "CA", "US")
+  icecastId      String
+  ipHash         String
+  country        String    @default("Unknown")
   city           String    @default("Unknown")
   userAgent      String?
-  deviceType     String    @default("Desktop") // Desktop, Mobile, Smart Speaker, Media Player
+  deviceType     String    @default("Desktop")
   connectedAt    DateTime  @default(now())
   disconnectedAt DateTime?
-  duration       Int?      // Connection duration in seconds
-
+  duration       Int?
   @@index([connectedAt])
   @@index([disconnectedAt])
 }
@@ -138,35 +192,31 @@ model ListenerSession {
 model Campaign {
   id                String    @id @default(uuid())
   clientName        String
-  clientIndustry    String    // e.g. "Automotive", "Beverage"
-  name              String    // e.g. "Summer Deal 2026"
+  clientIndustry    String
+  name              String
   startDate         DateTime
   endDate           DateTime
-  targetPlays       Int       // Total contracted plays
+  targetPlays       Int
   currentPlays      Int       @default(0)
-  targetImpressions Int       // Total contracted listener impressions
-  cpc               Float     // Cost Per Play or Cost Per Impression (for revenue tracking)
-  
-  // Optimization Constraints
-  dailyCap          Int       // Max plays per day
-  hourlyCap         Int       // Max plays per hour
+  targetImpressions Int
+  cpc               Float
+  dailyCap          Int
+  hourlyCap         Int
   validHoursStart   Int       @default(0)
   validHoursEnd     Int       @default(23)
-  
   ads               AdTrack[]
 }
 
 model AdTrack {
-  id          String   @id @default(uuid())
-  trackId     Int      @unique
-  campaignId  String
-  
-  track       Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
-  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  id         String  @id @default(uuid())
+  trackId    Int     @unique
+  campaignId String
+  track      Track   @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 }
 
+// Legacy 5-slot instant carts (kept for migration safety)
 model InstantCart {
-  slot      Int      @id // 1 to 5
-  trackId   Int
-  track     Track    @relation(fields: [trackId], references: [id], onDelete: Cascade)
+  slot    Int   @id
+  trackId Int
 }

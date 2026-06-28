@@ -165,6 +165,9 @@ function bootApp() {
   loadLibraryFolders();
   loadLibraryTracks();
   loadAnalytics();
+  initCartsUI();
+  initPoolsUI();
+  initScheduleUI();
   if (currentUser && currentUser.role === 'ADMIN') {
     loadSettingsUsers();
   }
@@ -358,6 +361,9 @@ function switchView(viewName) {
     loadLibraryTracks();
   }
   
+  if (viewName === 'carts') loadCarts();
+  if (viewName === 'pools') loadPools();
+  if (viewName === 'schedule') loadSchedule();
   if (viewName === 'system') {
     startSystemMonitoring();
   } else {
@@ -3740,3 +3746,555 @@ function loadDeckManualSelectors() {
     }
   });
 })();
+
+// ============================================================
+// INSTANT CARTS
+// ============================================================
+let cartEditId = null;
+
+async function loadCarts() {
+  try {
+    const res = await fetch('/api/carts', { headers: { Authorization: `Bearer ${jwtToken}` } });
+    const carts = await res.json();
+    const grid = document.getElementById('carts-grid');
+    const empty = document.getElementById('carts-empty');
+    if (!grid) return;
+    grid.innerHTML = '';
+    if (!carts.length) { empty.style.display = 'block'; return; }
+    empty.style.display = 'none';
+    const typeColors = { SWEEPER:'#ff6b6b', STATION_ID:'#00f0ff', DROP:'#ffd93d', JINGLE:'#6bcb77', OTHER:'#aaa' };
+    carts.forEach(cart => {
+      const color = typeColors[cart.type] || '#aaa';
+      const card = document.createElement('div');
+      card.className = 'glass-card';
+      card.style.cssText = 'padding:16px;display:flex;flex-direction:column;gap:12px;';
+      card.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+              <span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;background:${color}22;color:${color};border:1px solid ${color}44;">${cart.type.replace('_',' ')}</span>
+            </div>
+            <h3 style="margin:0;font-size:15px;font-weight:700;">${cart.name}</h3>
+            ${cart.description ? `<p style="margin:4px 0 0;font-size:12px;color:var(--text-muted);">${cart.description}</p>` : ''}
+          </div>
+          <div style="display:flex;gap:6px;">
+            <button onclick="editCart(${cart.id})" style="background:transparent;border:1px solid rgba(255,255,255,0.1);color:var(--text-muted);padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;">Edit</button>
+            <button onclick="deleteCart(${cart.id},'${cart.name}')" style="background:transparent;border:1px solid rgba(255,82,82,0.3);color:#ff5252;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;">Delete</button>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:8px;">TRACKS (${cart.tracks.length})</div>
+          <div id="cart-tracks-${cart.id}" style="display:flex;flex-direction:column;gap:6px;max-height:150px;overflow-y:auto;">
+            ${cart.tracks.map(ct => `
+              <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.03);border-radius:4px;padding:6px 10px;">
+                <span style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">${ct.track.title}${ct.track.artist ? ' — ' + ct.track.artist : ''}</span>
+                <button onclick="removeTrackFromCart(${cart.id},${ct.trackId})" style="background:transparent;border:none;color:#ff5252;cursor:pointer;font-size:14px;padding:0 4px;flex-shrink:0;">×</button>
+              </div>`).join('')}
+          </div>
+          <div style="display:flex;gap:8px;margin-top:10px;">
+            <select id="cart-track-select-${cart.id}" class="form-input" style="height:32px;font-size:12px;flex:1;">
+              <option value="">Add track...</option>
+            </select>
+            <button onclick="addTrackToCart(${cart.id})" style="height:32px;padding:0 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:var(--text-main);border-radius:4px;cursor:pointer;font-size:12px;white-space:nowrap;">+ Add</button>
+          </div>
+        </div>
+        <button onclick="triggerCart(${cart.id},'${cart.name}')" style="background:${color}22;border:1px solid ${color}55;color:${color};padding:8px;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;">▶ Trigger Cart</button>
+      `;
+      grid.appendChild(card);
+      populateCartTrackSelect(cart.id);
+    });
+  } catch(e) { console.error('loadCarts', e); }
+}
+
+async function populateCartTrackSelect(cartId) {
+  const sel = document.getElementById(`cart-track-select-${cartId}`);
+  if (!sel) return;
+  try {
+    const res = await fetch('/api/tracks?limit=500', { headers: { Authorization: `Bearer ${jwtToken}` } });
+    const data = await res.json();
+    const tracks = data.tracks || data;
+    sel.innerHTML = '<option value="">Add track...</option>';
+    tracks.forEach(t => {
+      const o = document.createElement('option');
+      o.value = t.id;
+      o.textContent = t.title + (t.artist ? ' — ' + t.artist : '');
+      sel.appendChild(o);
+    });
+  } catch(e) {}
+}
+
+async function addTrackToCart(cartId) {
+  const sel = document.getElementById(`cart-track-select-${cartId}`);
+  if (!sel || !sel.value) return;
+  try {
+    const res = await fetch(`/api/carts/${cartId}/tracks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwtToken}` },
+      body: JSON.stringify({ trackId: parseInt(sel.value) })
+    });
+    if (res.ok) { showToast('Track added to cart', 'success'); loadCarts(); }
+    else { const d = await res.json(); showToast(d.error || 'Error', 'error'); }
+  } catch(e) { showToast('Error adding track', 'error'); }
+}
+
+async function removeTrackFromCart(cartId, trackId) {
+  try {
+    await fetch(`/api/carts/${cartId}/tracks/${trackId}`, {
+      method: 'DELETE', headers: { Authorization: `Bearer ${jwtToken}` }
+    });
+    showToast('Track removed', 'success');
+    loadCarts();
+  } catch(e) {}
+}
+
+async function triggerCart(cartId, cartName) {
+  try {
+    const res = await fetch(`/api/carts/${cartId}/trigger`, {
+      method: 'POST', headers: { Authorization: `Bearer ${jwtToken}` }
+    });
+    const d = await res.json();
+    if (res.ok) showToast(d.message || `Cart "${cartName}" triggered`, 'success');
+    else showToast(d.error || 'Error', 'error');
+  } catch(e) { showToast('Error triggering cart', 'error'); }
+}
+
+async function editCart(id) {
+  try {
+    const res = await fetch(`/api/carts/${id}`, { headers: { Authorization: `Bearer ${jwtToken}` } });
+    const cart = await res.json();
+    document.getElementById('cart-name').value = cart.name;
+    document.getElementById('cart-type').value = cart.type;
+    document.getElementById('cart-desc').value = cart.description || '';
+    document.getElementById('cart-edit-id').value = id;
+    document.getElementById('cart-form-title').textContent = 'Edit Cart';
+    cartEditId = id;
+    document.getElementById('cart-form-panel').style.display = 'block';
+  } catch(e) {}
+}
+
+async function deleteCart(id, name) {
+  if (!confirm(`Delete cart "${name}"?`)) return;
+  try {
+    const res = await fetch(`/api/carts/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${jwtToken}` } });
+    if (res.ok) { showToast('Cart deleted', 'success'); loadCarts(); }
+    else { const d = await res.json(); showToast(d.error || 'Error', 'error'); }
+  } catch(e) {}
+}
+
+function initCartsUI() {
+  document.getElementById('btn-new-cart')?.addEventListener('click', () => {
+    cartEditId = null;
+    document.getElementById('cart-name').value = '';
+    document.getElementById('cart-type').value = 'JINGLE';
+    document.getElementById('cart-desc').value = '';
+    document.getElementById('cart-edit-id').value = '';
+    document.getElementById('cart-form-title').textContent = 'Create Cart';
+    document.getElementById('cart-form-panel').style.display = 'block';
+  });
+  document.getElementById('btn-cancel-cart')?.addEventListener('click', () => {
+    document.getElementById('cart-form-panel').style.display = 'none';
+  });
+  document.getElementById('btn-save-cart')?.addEventListener('click', async () => {
+    const name = document.getElementById('cart-name').value.trim();
+    const type = document.getElementById('cart-type').value;
+    const description = document.getElementById('cart-desc').value.trim();
+    if (!name) { showToast('Cart name is required', 'error'); return; }
+    const editId = document.getElementById('cart-edit-id').value;
+    const url = editId ? `/api/carts/${editId}` : '/api/carts';
+    const method = editId ? 'PUT' : 'POST';
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwtToken}` },
+        body: JSON.stringify({ name, type, description })
+      });
+      if (res.ok) {
+        showToast(editId ? 'Cart updated' : 'Cart created', 'success');
+        document.getElementById('cart-form-panel').style.display = 'none';
+        loadCarts();
+      } else { const d = await res.json(); showToast(d.error || 'Error', 'error'); }
+    } catch(e) { showToast('Error saving cart', 'error'); }
+  });
+}
+
+
+// ============================================================
+// FALLBACK POOLS
+// ============================================================
+let poolsData = [];
+
+async function loadPools() {
+  try {
+    const res = await fetch('/api/fallback-pools', { headers: { Authorization: `Bearer ${jwtToken}` } });
+    poolsData = await res.json();
+    renderPools();
+  } catch(e) { console.error('loadPools', e); }
+}
+
+function renderPools() {
+  const list = document.getElementById('pools-list');
+  const empty = document.getElementById('pools-empty');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!poolsData.length) { empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+  poolsData.forEach((pool, idx) => {
+    const card = document.createElement('div');
+    card.className = 'glass-card';
+    card.style.cssText = 'padding:16px;';
+    card.dataset.poolId = pool.id;
+    card.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="display:flex;flex-direction:column;gap:3px;">
+            <button onclick="movePool(${idx},-1)" ${idx===0?'disabled':''} style="background:transparent;border:1px solid rgba(255,255,255,0.1);color:var(--text-muted);width:24px;height:24px;border-radius:3px;cursor:pointer;font-size:11px;line-height:1;padding:0;">&#8593;</button>
+            <button onclick="movePool(${idx},1)" ${idx===poolsData.length-1?'disabled':''} style="background:transparent;border:1px solid rgba(255,255,255,0.1);color:var(--text-muted);width:24px;height:24px;border-radius:3px;cursor:pointer;font-size:11px;line-height:1;padding:0;">&#8595;</button>
+          </div>
+          <div>
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span style="font-size:11px;font-weight:700;color:var(--primary-color);">PRIORITY ${idx + 1}</span>
+            </div>
+            <h3 style="margin:0;font-size:15px;font-weight:700;">${pool.name}</h3>
+            ${pool.description ? `<p style="margin:2px 0 0;font-size:12px;color:var(--text-muted);">${pool.description}</p>` : ''}
+          </div>
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button onclick="deletePool(${pool.id},'${pool.name}',${pool.tracks.length})" style="background:transparent;border:1px solid rgba(255,82,82,0.3);color:#ff5252;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;">Delete</button>
+        </div>
+      </div>
+      <div>
+        <div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:8px;">TRACKS (${pool.tracks.length}) <span style="color:#ffd93d;font-size:10px;">Protected — cannot be deleted from library</span></div>
+        <div style="display:flex;flex-direction:column;gap:5px;max-height:180px;overflow-y:auto;margin-bottom:10px;">
+          ${pool.tracks.map(pt => `
+            <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.03);border-radius:4px;padding:6px 10px;">
+              <span style="font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;">${pt.track.title}${pt.track.artist ? ' — ' + pt.track.artist : ''}</span>
+              <span style="font-size:10px;color:var(--text-muted);margin:0 10px;">${pt.track.fileType}</span>
+              <button onclick="removeTrackFromPool(${pool.id},${pt.trackId})" style="background:transparent;border:none;color:#ff5252;cursor:pointer;font-size:14px;padding:0 4px;flex-shrink:0;">&#215;</button>
+            </div>`).join('') || '<p style="color:var(--text-muted);font-size:12px;text-align:center;padding:10px;">No tracks in this pool.</p>'}
+        </div>
+        <div style="display:flex;gap:8px;">
+          <select id="pool-track-select-${pool.id}" class="form-input" style="height:32px;font-size:12px;flex:1;">
+            <option value="">Add track to pool...</option>
+          </select>
+          <button onclick="addTrackToPool(${pool.id})" style="height:32px;padding:0 12px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:var(--text-main);border-radius:4px;cursor:pointer;font-size:12px;white-space:nowrap;">+ Add</button>
+        </div>
+      </div>
+    `;
+    list.appendChild(card);
+    populatePoolTrackSelect(pool.id);
+  });
+}
+
+async function populatePoolTrackSelect(poolId) {
+  const sel = document.getElementById(`pool-track-select-${poolId}`);
+  if (!sel) return;
+  try {
+    const res = await fetch('/api/tracks?limit=500', { headers: { Authorization: `Bearer ${jwtToken}` } });
+    const data = await res.json();
+    const tracks = data.tracks || data;
+    sel.innerHTML = '<option value="">Add track to pool...</option>';
+    tracks.forEach(t => {
+      const o = document.createElement('option');
+      o.value = t.id;
+      o.textContent = t.title + (t.artist ? ' — ' + t.artist : '') + ' [' + t.fileType + ']';
+      sel.appendChild(o);
+    });
+  } catch(e) {}
+}
+
+async function addTrackToPool(poolId) {
+  const sel = document.getElementById(`pool-track-select-${poolId}`);
+  if (!sel || !sel.value) return;
+  try {
+    const res = await fetch(`/api/fallback-pools/${poolId}/tracks`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwtToken}` },
+      body: JSON.stringify({ trackId: parseInt(sel.value) })
+    });
+    if (res.ok) { showToast('Track added to pool', 'success'); loadPools(); }
+    else { const d = await res.json(); showToast(d.error || 'Error', 'error'); }
+  } catch(e) { showToast('Error', 'error'); }
+}
+
+async function removeTrackFromPool(poolId, trackId) {
+  if (!confirm('Remove this track from the pool?')) return;
+  try {
+    await fetch(`/api/fallback-pools/${poolId}/tracks/${trackId}`, {
+      method: 'DELETE', headers: { Authorization: `Bearer ${jwtToken}` }
+    });
+    showToast('Track removed from pool', 'success');
+    loadPools();
+  } catch(e) {}
+}
+
+async function movePool(idx, dir) {
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= poolsData.length) return;
+  const tmp = poolsData[idx];
+  poolsData[idx] = poolsData[newIdx];
+  poolsData[newIdx] = tmp;
+  const orderedIds = poolsData.map(p => p.id);
+  try {
+    await fetch('/api/fallback-pools/reorder/priority', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwtToken}` },
+      body: JSON.stringify({ orderedIds })
+    });
+    renderPools();
+  } catch(e) { showToast('Reorder failed', 'error'); }
+}
+
+async function deletePool(id, name, trackCount) {
+  if (trackCount > 0) { showToast(`Remove all ${trackCount} tracks before deleting this pool.`, 'error'); return; }
+  if (!confirm(`Delete pool "${name}"?`)) return;
+  try {
+    const res = await fetch(`/api/fallback-pools/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${jwtToken}` } });
+    if (res.ok) { showToast('Pool deleted', 'success'); loadPools(); }
+    else { const d = await res.json(); showToast(d.error || 'Error', 'error'); }
+  } catch(e) {}
+}
+
+function initPoolsUI() {
+  document.getElementById('btn-new-pool')?.addEventListener('click', () => {
+    document.getElementById('pool-name').value = '';
+    document.getElementById('pool-desc').value = '';
+    document.getElementById('pool-form-panel').style.display = 'block';
+  });
+  document.getElementById('btn-cancel-pool')?.addEventListener('click', () => {
+    document.getElementById('pool-form-panel').style.display = 'none';
+  });
+  document.getElementById('btn-save-pool')?.addEventListener('click', async () => {
+    const name = document.getElementById('pool-name').value.trim();
+    const description = document.getElementById('pool-desc').value.trim();
+    if (!name) { showToast('Pool name is required', 'error'); return; }
+    try {
+      const res = await fetch('/api/fallback-pools', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwtToken}` },
+        body: JSON.stringify({ name, description })
+      });
+      if (res.ok) {
+        showToast('Pool created', 'success');
+        document.getElementById('pool-form-panel').style.display = 'none';
+        loadPools();
+      } else { const d = await res.json(); showToast(d.error || 'Error', 'error'); }
+    } catch(e) { showToast('Error saving pool', 'error'); }
+  });
+}
+
+
+// ============================================================
+// SCHEDULER
+// ============================================================
+let calYear = new Date().getFullYear();
+let calMonth = new Date().getMonth();
+let schedBlocks = [];
+let schedEditId = null;
+
+async function loadSchedule() {
+  const start = new Date(calYear, calMonth, 1).toISOString();
+  const end = new Date(calYear, calMonth + 1, 0, 23, 59, 59).toISOString();
+  try {
+    const res = await fetch(`/api/schedule?start=${start}&end=${end}`, { headers: { Authorization: `Bearer ${jwtToken}` } });
+    schedBlocks = await res.json();
+    renderCalendar();
+    renderScheduleList();
+  } catch(e) { console.error('loadSchedule', e); }
+}
+
+function renderCalendar() {
+  const label = document.getElementById('cal-month-label');
+  const days = document.getElementById('cal-days');
+  if (!label || !days) return;
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  label.textContent = `${months[calMonth]} ${calYear}`;
+  days.innerHTML = '';
+  const firstDay = new Date(calYear, calMonth, 1).getDay();
+  const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+  const today = new Date();
+  for (let i = 0; i < firstDay; i++) {
+    const blank = document.createElement('div');
+    blank.style.cssText = 'min-height:80px;border:1px solid rgba(255,255,255,0.03);background:rgba(0,0,0,0.1);';
+    days.appendChild(blank);
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    const isToday = today.getFullYear()===calYear && today.getMonth()===calMonth && today.getDate()===d;
+    const cell = document.createElement('div');
+    cell.style.cssText = `min-height:80px;border:1px solid rgba(255,255,255,0.05);padding:6px;position:relative;${isToday?'background:rgba(0,240,255,0.04);border-color:rgba(0,240,255,0.2);':''}`;
+    const dayNum = document.createElement('div');
+    dayNum.style.cssText = `font-size:12px;font-weight:${isToday?'700':'400'};color:${isToday?'var(--primary-color)':'var(--text-muted)'};margin-bottom:4px;`;
+    dayNum.textContent = d;
+    cell.appendChild(dayNum);
+    const cellDate = new Date(calYear, calMonth, d);
+    const dayBlocks = schedBlocks.filter(b => {
+      const bs = new Date(b.startTime);
+      const be = new Date(b.endTime);
+      return bs <= cellDate && be >= cellDate;
+    });
+    dayBlocks.forEach(b => {
+      const chip = document.createElement('div');
+      chip.style.cssText = `background:${b.color}33;border:1px solid ${b.color}66;border-radius:3px;padding:2px 5px;font-size:10px;color:${b.color};margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer;`;
+      chip.textContent = b.name;
+      chip.onclick = () => editScheduleBlock(b.id);
+      cell.appendChild(chip);
+    });
+    days.appendChild(cell);
+  }
+}
+
+function renderScheduleList() {
+  const list = document.getElementById('schedule-list');
+  const empty = document.getElementById('schedule-empty');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!schedBlocks.length) { empty.style.display = 'block'; return; }
+  empty.style.display = 'none';
+  const sorted = [...schedBlocks].sort((a,b) => new Date(a.startTime)-new Date(b.startTime));
+  sorted.forEach(b => {
+    const row = document.createElement('div');
+    row.className = 'glass-card';
+    row.style.cssText = 'padding:12px 16px;display:flex;justify-content:space-between;align-items:center;';
+    const s = new Date(b.startTime);
+    const e = new Date(b.endTime);
+    const fmt = d => d.toLocaleString('en-CA',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+    row.innerHTML = `
+      <div style="display:flex;align-items:center;gap:12px;flex:1;min-width:0;">
+        <div style="width:12px;height:12px;border-radius:50%;background:${b.color};flex-shrink:0;"></div>
+        <div style="min-width:0;">
+          <div style="font-size:14px;font-weight:600;">${b.name}</div>
+          <div style="font-size:11px;color:var(--text-muted);">${fmt(s)} &rarr; ${fmt(e)} &nbsp;|&nbsp; ${b.contentType}${b.isRecurring?' | Recurring: '+b.recurrenceDays:''}</div>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0;">
+        <button onclick="editScheduleBlock(${b.id})" style="background:transparent;border:1px solid rgba(255,255,255,0.1);color:var(--text-muted);padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;">Edit</button>
+        <button onclick="deleteScheduleBlock(${b.id},'${b.name}')" style="background:transparent;border:1px solid rgba(255,82,82,0.3);color:#ff5252;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px;">Delete</button>
+      </div>
+    `;
+    list.appendChild(row);
+  });
+}
+
+async function populateSchedContentSelect() {
+  const typeEl = document.getElementById('sched-content-type');
+  const sel = document.getElementById('sched-content-id');
+  if (!typeEl || !sel) return;
+  const type = typeEl.value;
+  sel.innerHTML = '<option value="">-- select --</option>';
+  try {
+    if (type === 'PLAYLIST') {
+      const res = await fetch('/api/playlists', { headers: { Authorization: `Bearer ${jwtToken}` } });
+      const items = await res.json();
+      (items.playlists || items).forEach(p => {
+        const o = document.createElement('option'); o.value = p.id; o.textContent = p.name; sel.appendChild(o);
+      });
+    } else {
+      const res = await fetch('/api/carts', { headers: { Authorization: `Bearer ${jwtToken}` } });
+      const items = await res.json();
+      items.forEach(c => {
+        const o = document.createElement('option'); o.value = c.id; o.textContent = `[${c.type}] ${c.name}`; sel.appendChild(o);
+      });
+    }
+  } catch(e) {}
+}
+
+async function editScheduleBlock(id) {
+  try {
+    const res = await fetch(`/api/schedule/${id}`, { headers: { Authorization: `Bearer ${jwtToken}` } });
+    const b = await res.json();
+    document.getElementById('sched-name').value = b.name;
+    document.getElementById('sched-content-type').value = b.contentType;
+    await populateSchedContentSelect();
+    document.getElementById('sched-content-id').value = b.contentId || '';
+    const toLocal = d => new Date(d).toISOString().slice(0,16);
+    document.getElementById('sched-start').value = toLocal(b.startTime);
+    document.getElementById('sched-end').value = toLocal(b.endTime);
+    document.getElementById('sched-color').value = b.color || '#00f0ff';
+    document.getElementById('sched-recurring').checked = b.isRecurring;
+    document.getElementById('sched-days-panel').style.display = b.isRecurring ? 'flex' : 'none';
+    if (b.recurrenceDays) {
+      const days = b.recurrenceDays.split(',');
+      document.querySelectorAll('.sched-day').forEach(cb => { cb.checked = days.includes(cb.value); });
+    }
+    document.getElementById('sched-edit-id').value = id;
+    document.getElementById('schedule-form-title').textContent = 'Edit Schedule Block';
+    schedEditId = id;
+    document.getElementById('schedule-form-panel').style.display = 'block';
+  } catch(e) { console.error('editScheduleBlock', e); }
+}
+
+async function deleteScheduleBlock(id, name) {
+  if (!confirm(`Delete schedule block "${name}"?`)) return;
+  try {
+    await fetch(`/api/schedule/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${jwtToken}` } });
+    showToast('Block deleted', 'success');
+    loadSchedule();
+  } catch(e) {}
+}
+
+function initScheduleUI() {
+  document.getElementById('btn-new-block')?.addEventListener('click', async () => {
+    schedEditId = null;
+    document.getElementById('sched-name').value = '';
+    document.getElementById('sched-content-type').value = 'PLAYLIST';
+    await populateSchedContentSelect();
+    document.getElementById('sched-content-id').value = '';
+    document.getElementById('sched-start').value = '';
+    document.getElementById('sched-end').value = '';
+    document.getElementById('sched-color').value = '#00f0ff';
+    document.getElementById('sched-recurring').checked = false;
+    document.getElementById('sched-days-panel').style.display = 'none';
+    document.querySelectorAll('.sched-day').forEach(cb => cb.checked = false);
+    document.getElementById('sched-edit-id').value = '';
+    document.getElementById('schedule-form-title').textContent = 'Create Schedule Block';
+    document.getElementById('schedule-form-panel').style.display = 'block';
+  });
+
+  document.getElementById('sched-content-type')?.addEventListener('change', populateSchedContentSelect);
+
+  document.getElementById('sched-recurring')?.addEventListener('change', e => {
+    document.getElementById('sched-days-panel').style.display = e.target.checked ? 'flex' : 'none';
+  });
+
+  document.getElementById('btn-cancel-block')?.addEventListener('click', () => {
+    document.getElementById('schedule-form-panel').style.display = 'none';
+  });
+
+  document.getElementById('btn-save-block')?.addEventListener('click', async () => {
+    const name = document.getElementById('sched-name').value.trim();
+    const contentType = document.getElementById('sched-content-type').value;
+    const contentId = document.getElementById('sched-content-id').value;
+    const startTime = document.getElementById('sched-start').value;
+    const endTime = document.getElementById('sched-end').value;
+    const color = document.getElementById('sched-color').value;
+    const isRecurring = document.getElementById('sched-recurring').checked;
+    const recurrenceDays = isRecurring
+      ? Array.from(document.querySelectorAll('.sched-day:checked')).map(c=>c.value).join(',')
+      : null;
+    if (!name || !startTime || !endTime) { showToast('Name, start and end are required', 'error'); return; }
+    const editId = document.getElementById('sched-edit-id').value;
+    const url = editId ? `/api/schedule/${editId}` : '/api/schedule';
+    const method = editId ? 'PUT' : 'POST';
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${jwtToken}` },
+        body: JSON.stringify({ name, contentType, contentId: contentId || null, startTime, endTime, color, isRecurring, recurrenceDays })
+      });
+      if (res.ok) {
+        showToast(editId ? 'Block updated' : 'Block created', 'success');
+        document.getElementById('schedule-form-panel').style.display = 'none';
+        loadSchedule();
+      } else { const d = await res.json(); showToast(d.error || 'Error saving block', 'error'); }
+    } catch(e) { showToast('Error', 'error'); }
+  });
+
+  document.getElementById('cal-prev')?.addEventListener('click', () => {
+    calMonth--; if (calMonth < 0) { calMonth = 11; calYear--; } loadSchedule();
+  });
+  document.getElementById('cal-next')?.addEventListener('click', () => {
+    calMonth++; if (calMonth > 11) { calMonth = 0; calYear++; } loadSchedule();
+  });
+  document.getElementById('cal-today')?.addEventListener('click', () => {
+    calYear = new Date().getFullYear(); calMonth = new Date().getMonth(); loadSchedule();
+  });
+}

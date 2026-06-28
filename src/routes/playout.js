@@ -238,7 +238,8 @@ router.get('/next-track-path', async (req, res) => {
     const volume = track.volumeTrim || 1.0;
     
     // Construct annotated string for Liquidsoap
-    const annotatedPath = `annotate:liq_cue_in=${cueIn.toFixed(2)},liq_cue_out=${cueOut.toFixed(2)},liq_amplify=${volume.toFixed(2)}:/home/ubuntu/radioplayone/storage/${track.filePath}`;
+    const storagePath = new URL('../../storage', import.meta.url).pathname;
+    const annotatedPath = `annotate:liq_cue_in=${cueIn.toFixed(2)},liq_cue_out=${cueOut.toFixed(2)},liq_amplify=${volume.toFixed(2)}:${storagePath}/${track.filePath}`;
     
     logger.info(`Liquidsoap fetch: ${annotatedPath}`);
     res.send(annotatedPath);

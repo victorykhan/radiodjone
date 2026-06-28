@@ -594,6 +594,14 @@ router.delete('/:id', authenticateJWT, requireRole(['ADMIN']), async (req, res) 
       return res.status(404).json({ error: 'Track not found' });
     }
 
+    // Prevent deletion if track is in any fallback pool
+    const poolCount = await prisma.fallbackPoolTrack.count({ where: { trackId } });
+    if (poolCount > 0) {
+      return res.status(400).json({
+        error: 'Track is in a fallback pool. Remove it from all pools first.'
+      });
+    }
+
     await prisma.track.update({
       where: { id: trackId },
       data: { isDeleted: true }

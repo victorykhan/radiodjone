@@ -105,6 +105,9 @@
         <li><a class="nav-item" data-view="settings">⚙️ Settings</a></li>
         <li><a class="nav-item" data-view="system">💻 System Status</a></li>
         <li><a class="nav-item" data-view="logs">📜 System Logs</a></li>
+        <li><a class="nav-item" data-view="carts">🎛️ Instant Carts</a></li>
+        <li><a class="nav-item" data-view="pools">🎵 Fallback Pools</a></li>
+        <li><a class="nav-item" data-view="schedule">📅 Scheduler</a></li>
       </ul>
       <div style="margin-top: auto;">
         <a id="btn-logout" class="nav-item" style="color: #ff5252;">🚪 Log Out</a>
@@ -1270,7 +1273,164 @@
     </div>
   </div>
 
-  <div id="toast-container"></div>
+
+      <!-- SECTION: INSTANT CARTS -->
+      <section id="section-carts" class="view-section">
+        <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <h1 class="section-title">Instant Carts</h1>
+            <p style="color:var(--text-muted);">Named audio carts: Sweepers, Station IDs, Drops, Jingles. Trigger instantly during broadcast.</p>
+          </div>
+          <button id="btn-new-cart" class="form-input" style="width:auto;padding:0 20px;height:36px;background:var(--primary-color);border-color:var(--primary-color);color:#000;font-weight:600;cursor:pointer;">+ New Cart</button>
+        </div>
+        <div id="cart-form-panel" class="glass-card" style="display:none;margin-bottom:24px;">
+          <h3 id="cart-form-title" style="margin:0 0 16px;font-size:15px;font-weight:600;">Create Cart</h3>
+          <div style="display:grid;grid-template-columns:1fr 1fr 2fr;gap:12px;margin-bottom:12px;">
+            <div>
+              <label class="form-label">Cart Name *</label>
+              <input id="cart-name" class="form-input" placeholder="e.g. Morning Sweeper" style="height:36px;">
+            </div>
+            <div>
+              <label class="form-label">Type</label>
+              <select id="cart-type" class="form-input" style="height:36px;">
+                <option value="SWEEPER">Sweeper</option>
+                <option value="STATION_ID">Station ID</option>
+                <option value="DROP">Drop</option>
+                <option value="JINGLE" selected>Jingle</option>
+                <option value="OTHER">Other</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label">Description</label>
+              <input id="cart-desc" class="form-input" placeholder="Optional description" style="height:36px;">
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;">
+            <button id="btn-save-cart" class="form-input" style="width:auto;padding:0 20px;height:34px;background:var(--primary-color);border-color:var(--primary-color);color:#000;font-weight:600;cursor:pointer;">Save</button>
+            <button id="btn-cancel-cart" class="form-input" style="width:auto;padding:0 16px;height:34px;background:transparent;border-color:rgba(255,255,255,0.15);color:var(--text-main);cursor:pointer;">Cancel</button>
+          </div>
+          <input type="hidden" id="cart-edit-id">
+        </div>
+        <div id="carts-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:18px;"></div>
+        <p id="carts-empty" style="color:var(--text-muted);text-align:center;padding:40px;display:none;">No carts yet. Create one above.</p>
+      </section>
+
+      <!-- SECTION: FALLBACK POOLS -->
+      <section id="section-pools" class="view-section">
+        <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <h1 class="section-title">Fallback Pools</h1>
+            <p style="color:var(--text-muted);">Priority-ordered music pools. Top pool plays when no content is scheduled; falls through if empty.</p>
+          </div>
+          <button id="btn-new-pool" class="form-input" style="width:auto;padding:0 20px;height:36px;background:var(--primary-color);border-color:var(--primary-color);color:#000;font-weight:600;cursor:pointer;">+ New Pool</button>
+        </div>
+        <div id="pool-form-panel" class="glass-card" style="display:none;margin-bottom:24px;">
+          <h3 style="margin:0 0 16px;font-size:15px;font-weight:600;">Create Fallback Pool</h3>
+          <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px;margin-bottom:12px;">
+            <div>
+              <label class="form-label">Pool Name *</label>
+              <input id="pool-name" class="form-input" placeholder="e.g. Main Rotation" style="height:36px;">
+            </div>
+            <div>
+              <label class="form-label">Description</label>
+              <input id="pool-desc" class="form-input" placeholder="Optional" style="height:36px;">
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;">
+            <button id="btn-save-pool" class="form-input" style="width:auto;padding:0 20px;height:34px;background:var(--primary-color);border-color:var(--primary-color);color:#000;font-weight:600;cursor:pointer;">Save</button>
+            <button id="btn-cancel-pool" class="form-input" style="width:auto;padding:0 16px;height:34px;background:transparent;border-color:rgba(255,255,255,0.15);color:var(--text-main);cursor:pointer;">Cancel</button>
+          </div>
+        </div>
+        <p style="color:var(--text-muted);font-size:12px;margin-bottom:16px;">Top card plays first. Use arrows to reorder priority.</p>
+        <div id="pools-list" style="display:flex;flex-direction:column;gap:18px;"></div>
+        <p id="pools-empty" style="color:var(--text-muted);text-align:center;padding:40px;display:none;">No fallback pools yet. Create one above.</p>
+      </section>
+
+      <!-- SECTION: SCHEDULER -->
+      <section id="section-schedule" class="view-section">
+        <div class="section-header" style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <h1 class="section-title">Broadcast Scheduler</h1>
+            <p style="color:var(--text-muted);">Schedule playlists and carts up to 3 months ahead. Active block overrides fallback pools.</p>
+          </div>
+          <button id="btn-new-block" class="form-input" style="width:auto;padding:0 20px;height:36px;background:var(--primary-color);border-color:var(--primary-color);color:#000;font-weight:600;cursor:pointer;">+ New Block</button>
+        </div>
+        <div id="schedule-form-panel" class="glass-card" style="display:none;margin-bottom:24px;">
+          <h3 id="schedule-form-title" style="margin:0 0 16px;font-size:15px;font-weight:600;">Create Schedule Block</h3>
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px;">
+            <div>
+              <label class="form-label">Block Name *</label>
+              <input id="sched-name" class="form-input" placeholder="e.g. Morning Drive" style="height:36px;">
+            </div>
+            <div>
+              <label class="form-label">Content Type</label>
+              <select id="sched-content-type" class="form-input" style="height:36px;">
+                <option value="PLAYLIST">Playlist</option>
+                <option value="CART">Cart</option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label">Content</label>
+              <select id="sched-content-id" class="form-input" style="height:36px;"><option value="">-- select --</option></select>
+            </div>
+            <div>
+              <label class="form-label">Start Date/Time *</label>
+              <input id="sched-start" type="datetime-local" class="form-input" style="height:36px;">
+            </div>
+            <div>
+              <label class="form-label">End Date/Time *</label>
+              <input id="sched-end" type="datetime-local" class="form-input" style="height:36px;">
+            </div>
+            <div>
+              <label class="form-label">Block Color</label>
+              <input id="sched-color" type="color" value="#00f0ff" class="form-input" style="height:36px;padding:2px 6px;">
+            </div>
+          </div>
+          <div style="display:flex;gap:16px;align-items:center;margin-bottom:12px;flex-wrap:wrap;">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;color:var(--text-muted);">
+              <input type="checkbox" id="sched-recurring" style="accent-color:var(--primary-color);"> Recurring
+            </label>
+            <div id="sched-days-panel" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;">
+              <span style="font-size:12px;color:var(--text-muted);">Days:</span>
+              <label style="font-size:12px;cursor:pointer;"><input type="checkbox" value="MON" class="sched-day"> Mon</label>
+              <label style="font-size:12px;cursor:pointer;"><input type="checkbox" value="TUE" class="sched-day"> Tue</label>
+              <label style="font-size:12px;cursor:pointer;"><input type="checkbox" value="WED" class="sched-day"> Wed</label>
+              <label style="font-size:12px;cursor:pointer;"><input type="checkbox" value="THU" class="sched-day"> Thu</label>
+              <label style="font-size:12px;cursor:pointer;"><input type="checkbox" value="FRI" class="sched-day"> Fri</label>
+              <label style="font-size:12px;cursor:pointer;"><input type="checkbox" value="SAT" class="sched-day"> Sat</label>
+              <label style="font-size:12px;cursor:pointer;"><input type="checkbox" value="SUN" class="sched-day"> Sun</label>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;">
+            <button id="btn-save-block" class="form-input" style="width:auto;padding:0 20px;height:34px;background:var(--primary-color);border-color:var(--primary-color);color:#000;font-weight:600;cursor:pointer;">Save</button>
+            <button id="btn-cancel-block" class="form-input" style="width:auto;padding:0 16px;height:34px;background:transparent;border-color:rgba(255,255,255,0.15);color:var(--text-main);cursor:pointer;">Cancel</button>
+          </div>
+          <input type="hidden" id="sched-edit-id">
+        </div>
+        <div style="display:flex;align-items:center;gap:16px;margin-bottom:20px;">
+          <button id="cal-prev" class="form-input" style="width:36px;height:36px;padding:0;background:transparent;border-color:rgba(255,255,255,0.15);color:var(--text-main);cursor:pointer;font-size:16px;">&#8249;</button>
+          <span id="cal-month-label" style="font-size:16px;font-weight:600;color:var(--text-main);min-width:160px;text-align:center;"></span>
+          <button id="cal-next" class="form-input" style="width:36px;height:36px;padding:0;background:transparent;border-color:rgba(255,255,255,0.15);color:var(--text-main);cursor:pointer;font-size:16px;">&#8250;</button>
+          <button id="cal-today" class="form-input" style="width:auto;height:36px;padding:0 14px;background:transparent;border-color:rgba(255,255,255,0.15);color:var(--text-muted);cursor:pointer;font-size:12px;">Today</button>
+        </div>
+        <div class="glass-card" style="padding:0;overflow:hidden;">
+          <div style="display:grid;grid-template-columns:repeat(7,1fr);">
+            <div style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-muted);border-bottom:1px solid rgba(255,255,255,0.05);">SUN</div>
+            <div style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-muted);border-bottom:1px solid rgba(255,255,255,0.05);">MON</div>
+            <div style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-muted);border-bottom:1px solid rgba(255,255,255,0.05);">TUE</div>
+            <div style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-muted);border-bottom:1px solid rgba(255,255,255,0.05);">WED</div>
+            <div style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-muted);border-bottom:1px solid rgba(255,255,255,0.05);">THU</div>
+            <div style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-muted);border-bottom:1px solid rgba(255,255,255,0.05);">FRI</div>
+            <div style="padding:8px 12px;font-size:11px;font-weight:700;color:var(--text-muted);border-bottom:1px solid rgba(255,255,255,0.05);">SAT</div>
+          </div>
+          <div id="cal-days" style="display:grid;grid-template-columns:repeat(7,1fr);"></div>
+        </div>
+        <h3 style="margin:24px 0 12px;font-size:14px;font-weight:600;color:var(--text-muted);">UPCOMING BLOCKS THIS MONTH</h3>
+        <div id="schedule-list" style="display:flex;flex-direction:column;gap:10px;"></div>
+        <p id="schedule-empty" style="color:var(--text-muted);text-align:center;padding:20px;display:none;">No scheduled blocks this month.</p>
+      </section>
+
+    <div id="toast-container"></div>
   <script src="/js/app.js"></script>
 </body>
 </html>

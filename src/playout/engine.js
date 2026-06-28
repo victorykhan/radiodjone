@@ -254,34 +254,66 @@ class PlayoutEngine {
         return scheduledPlaylist.tracks[0].track;
       }
 
-      // Rule 2: Check Fallback Pool playlist
-      const fallbackPlaylist = await prisma.playlist.findFirst({
-        where: { name: 'Fallback Pool' },
-        include: {
-          tracks: {
-            orderBy: { position: 'asc' },
-            include: { track: true }
+      // Rule 2: Check active ScheduleBlock
+      const nowTime = new Date();
+      const activeBlock = await prisma.scheduleBlock.findFirst({
+        where: { startTime: { lte: nowTime }, endTime: { gte: nowTime } },
+        orderBy: { startTime: 'desc' }
+      });
+
+      if (activeBlock && activeBlock.contentId) {
+        if (activeBlock.contentType === 'PLAYLIST') {
+          const sched = await prisma.playlist.findUnique({
+            where: { id: activeBlock.contentId },
+            include: { tracks: { orderBy: { position: 'asc' }, include: { track: true } } }
+          });
+          if (sched && sched.tracks.length > 0) {
+            if (playoutState.activeScheduleBlockId !== activeBlock.id) {
+              playoutState.activeScheduleBlockId = activeBlock.id;
+              playoutState.activeScheduleBlockIndex = 0;
+            }
+            const idx = playoutState.activeScheduleBlockIndex % sched.tracks.length;
+            playoutState.activeScheduleBlockIndex = idx + 1;
+            const t = sched.tracks[idx];
+            if (t && t.track && !t.track.isDeleted) {
+              logger.info('Scheduler: ScheduleBlock %s -> track %s', activeBlock.name, t.track.title);
+              return t.track;
+            }
+          }
+        } else if (activeBlock.contentType === 'CART') {
+          const cart = await prisma.cart.findUnique({
+            where: { id: activeBlock.contentId },
+            include: { tracks: { include: { track: true } } }
+          });
+          if (cart && cart.tracks.length > 0) {
+            const available = cart.tracks.filter(ct => ct.track && !ct.track.isDeleted);
+            if (available.length > 0) {
+              const picked = available[Math.floor(Math.random() * available.length)];
+              logger.info('Scheduler: ScheduleBlock %s (cart) -> track %s', activeBlock.name, picked.track.title);
+              return picked.track;
+            }
           }
         }
-      });
-
-      if (fallbackPlaylist && fallbackPlaylist.tracks.length > 0) {
-        const idx = playoutState.fallbackPlaylistIndex % fallbackPlaylist.tracks.length;
-        playoutState.fallbackPlaylistIndex = idx + 1;
-        const playlistTrack = fallbackPlaylist.tracks[idx];
-        logger.info('Scheduler selected track from Fallback Pool playlist: %s', playlistTrack.track.title);
-        return playlistTrack.track;
+      } else {
+        playoutState.activeScheduleBlockId = null;
+        playoutState.activeScheduleBlockIndex = 0;
       }
 
-      // Rule 2.5: Legacy Fallback Pool items
-      const fallbackItem = await prisma.fallbackPoolItem.findFirst({
-        orderBy: { priority: 'desc' },
-        include: { track: true }
+      // Rule 3: Priority-ordered Fallback Pools
+      const pools = await prisma.fallbackPool.findMany({
+        orderBy: { priority: 'asc' },
+        include: { tracks: { orderBy: { position: 'asc' }, include: { track: true } } }
       });
 
-      if (fallbackItem && !fallbackItem.track.isDeleted) {
-        logger.info('Scheduler selected track from legacy Fallback Pool: %s', fallbackItem.track.title);
-        return fallbackItem.track;
+      for (const pool of pools) {
+        const activeTracks = pool.tracks.filter(pt => pt.track && !pt.track.isDeleted);
+        if (activeTracks.length === 0) continue;
+        const key = 'pool_' + pool.id;
+        if (!playoutState.poolIndexes) playoutState.poolIndexes = {};
+        const idx = (playoutState.poolIndexes[key] || 0) % activeTracks.length;
+        playoutState.poolIndexes[key] = idx + 1;
+        logger.info('Scheduler: FallbackPool %s (priority %d) -> %s', pool.name, pool.priority, activeTracks[idx].track.title);
+        return activeTracks[idx].track;
       }
 
       // Rule 3: Fallback to a random song
